@@ -12,6 +12,7 @@ export class AgentContainer extends Container {
   sleepAfter = '10m'
   defaultPort = PORT
 
+  private _startPromise?: Promise<void>
   private _watchPromise?: Promise<void>
 
   envVars = {
@@ -19,8 +20,41 @@ export class AgentContainer extends Container {
     PORT: PORT.toString(),
   }
 
+  private async ensureContainerStarted() {
+    if (this._startPromise) {
+      return this._startPromise
+    }
+
+    this._startPromise = (async () => {
+      const maxAttempts = 3
+      const delaysMs = [0, 300, 800]
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          if (attempt > 1) {
+            const delayMs = delaysMs[attempt - 1] ?? 800
+            await new Promise((resolve) => setTimeout(resolve, delayMs))
+          }
+          console.info(`Starting container (attempt ${attempt}/${maxAttempts})`)
+          await this.start()
+          console.info('Container started')
+          return
+        } catch (error) {
+          console.error('Container start failed:', error)
+          if (attempt === maxAttempts) {
+            this._startPromise = undefined
+            throw error
+          }
+        }
+      }
+    })()
+
+    return this._startPromise
+  }
+
   async watchContainer() {
     try {
+      await this.ensureContainerStarted()
       const res = await this.containerFetch('http://container/global/event')
       const reader = res.body?.getReader()
       if (reader) {
@@ -46,6 +80,11 @@ export class AgentContainer extends Container {
   override async onStart(): Promise<void> {
     // Fire-and-forget: let SSE listener run in background to avoid blocking blockConcurrencyWhile
     this._watchPromise = this.watchContainer()
+  }
+
+  override async fetch(request: Request): Promise<Response> {
+    await this.ensureContainerStarted()
+    return super.fetch(request)
   }
 }
 

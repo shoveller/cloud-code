@@ -34,7 +34,15 @@ async function handleFetch(request: Request) {
   if (authError) {
     return authError
   }
-  return forwardRequestToContainer(request)
+  try {
+    return await forwardRequestToContainer(request)
+  } catch (error) {
+    console.error('Container request failed:', error)
+    return new Response('Service unavailable. Container is starting, retry soon.', {
+      status: 503,
+      headers: { 'Retry-After': '3' },
+    })
+  }
 }
 
 export default {
